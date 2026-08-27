@@ -26,7 +26,7 @@
             font-weight: bold;
             display: flex;
             justify-content: space-between;
-            width: 800px;
+            width: 1000px;
         }
 
         canvas {
@@ -41,9 +41,9 @@
     <div id="game-container">
         <div id="ui">
             <span>Score: <span id="score">0</span></span>
-            <span id="instructions">Press <strong>SPACE</strong> or <strong>CLICK</strong> to shoot a web & swing!</span>
+            <span id="instructions">Press <strong>SPACE</strong> or <strong>CLICK</strong> to shoot a web & swing! (Phasing through buildings enabled)</span>
         </div>
-        <canvas id="gameCanvas" width="800" height="400"></canvas>
+        <canvas id="gameCanvas" width="1000" height="500"></canvas>
     </div>
     <script>
         const canvas = document.getElementById("gameCanvas");
@@ -53,12 +53,12 @@
         let isGameOver = false;
 
         let player = {
-            x: 100,
-            y: 250,
+            x: 150,
+            y: 150,
             radius: 15,
             vy: 0,
-            vx: 3,
-            gravity: 0.4,
+            vx: 3.5,
+            gravity: 0.35,
             isSwinging: false,
             swingAngle: 0,
             anchorPoint: null
@@ -67,16 +67,18 @@
         let obstacles = [];
         let obstacleTimer = 0;
 
-        function spawnObstacle() {
-            let height = Math.random() * 150 + 50;
+        function spawnObstacle(customX = canvas.width) {
+            let height = Math.random() * 200 + 80;
             obstacles.push({
-                x: canvas.width,
+                x: customX,
                 y: canvas.height - height,
-                width: 60,
+                width: 70,
                 height: height,
                 passed: false
             });
         }
+
+        spawnObstacle(400);
 
         window.addEventListener("keydown", (e) => {
             if (e.code === "Space") {
@@ -109,11 +111,12 @@
         function resetGame() {
             score = 0;
             obstacles = [];
-            player.x = 100;
-            player.y = 250;
+            player.x = 150;
+            player.y = 150;
             player.vy = 0;
             player.isSwinging = false;
             isGameOver = false;
+            spawnObstacle(400);
             loop();
         }
 
@@ -121,20 +124,20 @@
             if (isGameOver) return;
 
             obstacleTimer++;
-            if (obstacleTimer > 120) {
+            if (obstacleTimer > 90) {
                 spawnObstacle();
                 obstacleTimer = 0;
             }
 
             if (player.isSwinging && player.anchorPoint) {
                 player.swingAngle += 0.05;
-                let radiusLength = 120;
+                let radiusLength = 140;
                 player.x += player.vx;
                 player.y = player.anchorPoint.y + Math.sin(player.swingAngle) * radiusLength;
                 
                 if (player.swingAngle > Math.PI) {
                     player.isSwinging = false;
-                    player.vy = -4;
+                    player.vy = -4.5;
                 }
             } else {
                 player.vy += player.gravity;
@@ -145,13 +148,7 @@
             for (let i = obstacles.length - 1; i >= 0; i--) {
                 obstacles[i].x -= player.vx;
 
-                if (
-                    player.x + player.radius > obstacles[i].x &&
-                    player.x - player.radius < obstacles[i].x + obstacles[i].width &&
-                    player.y + player.radius > obstacles[i].y
-                ) {
-                    isGameOver = true;
-                }
+                // Building collision check removed so you phase right through them!
 
                 if (!obstacles[i].passed && obstacles[i].x + obstacles[i].width < player.x) {
                     score++;
@@ -176,8 +173,8 @@
             obstacles.forEach(obs => {
                 ctx.fillRect(obs.x, obs.y, obs.width, obs.height);
                 ctx.fillStyle = "#fbbf24";
-                ctx.fillRect(obs.x + 10, obs.y + 15, 10, 15);
-                ctx.fillRect(obs.x + 35, obs.y + 15, 10, 15);
+                ctx.fillRect(obs.x + 12, obs.y + 20, 10, 18);
+                ctx.fillRect(obs.x + 44, obs.y + 20, 10, 18);
                 ctx.fillStyle = "#334155";
             });
 
