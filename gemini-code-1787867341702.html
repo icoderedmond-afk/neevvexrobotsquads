@@ -1,0 +1,755 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Neon Dash - Ultimate Edition</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: #030308;
+            color: #ffffff;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            overflow: hidden;
+        }
+        h1 {
+            margin: 5px;
+            font-size: 1.8rem;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            color: #00ffff;
+            text-shadow: 0 0 10px rgba(0, 255, 255, 0.7);
+        }
+        p {
+            margin: 0 0 15px 0;
+            font-size: 0.9rem;
+            color: #ff00ff;
+            text-shadow: 0 0 8px rgba(255, 0, 255, 0.6);
+        }
+        canvas {
+            border: 2px solid #00ffff;
+            box-shadow: 0 0 25px rgba(0, 255, 255, 0.4), inset 0 0 25px rgba(255, 0, 255, 0.2);
+            background: #000000;
+        }
+    </style>
+</head>
+<body>
+
+    <h1>Neon Dash: Ultimate</h1>
+    <p>Jetpack mode updated: Double jumping is now enabled! You can jump once from a platform and perform an air jump over the void.</p>
+    <canvas id="gameCanvas" width="800" height="400"></canvas>
+
+    <script>
+        const canvas = document.getElementById("gameCanvas");
+        const ctx = canvas.getContext("2d");
+
+        let score = 0;
+        let highScore = 0;
+        let gameSpeed = 7;
+        let isGameOver = false;
+        let backgroundHue = 0;
+        
+        const modes = ["cube", "ball", "ship", "wave", "jetpack"];
+        let currentModeIndex = 0;
+        let currentMode = modes[currentModeIndex];
+        let modeTimer = 0;
+        let particles = [];
+
+        // Unmissable Gate Coin Variables
+        let transitionCoin = null;
+
+        // Wave Continuous Spikes Variables
+        let waveModeActive = false;
+        let waveDelayTimer = 0;
+
+        // Jetpack Mode Variables
+        let jetpackModeActive = false;
+        let platforms = [];
+        let jetpackSpawnTimer = 0;
+
+        const player = {
+            x: 100,
+            y: 300,
+            size: 26,
+            velocityY: 0,
+            gravity: 0.8,
+            jumpStrength: -13,
+            grounded: false,
+            jumpCount: 0,
+            maxJumps: 2,
+            rotation: 0,
+            gravityDirection: 1,
+            trail: []
+        };
+
+        let obstacles = [];
+        let spawnTimer = 0;
+        let nextSpawnTime = 60;
+        let isHoldingJump = false;
+
+        window.addEventListener("keydown", (e) => {
+            if (e.code === "Space") {
+                e.preventDefault();
+                isHoldingJump = true;
+                triggerAction();
+            }
+        });
+
+        window.addEventListener("keyup", (e) => {
+            if (e.code === "Space") {
+                isHoldingJump = false;
+            }
+        });
+
+        canvas.addEventListener("mousedown", () => {
+            isHoldingJump = true;
+            triggerAction();
+        });
+
+        canvas.addEventListener("mouseup", () => {
+            isHoldingJump = false;
+        });
+
+        function triggerAction() {
+            if (isGameOver) {
+                resetGame();
+            } else if (currentMode === "cube") {
+                if (player.grounded || player.jumpCount < player.maxJumps) {
+                    player.velocityY = player.jumpStrength;
+                    player.grounded = false;
+                    player.jumpCount++;
+                    spawnParticles(player.x, player.y + player.size, player.jumpCount === 2 ? "#ff00ff" : "#00ffff", 6);
+                }
+            } else if (currentMode === "ball") {
+                player.gravityDirection *= -1;
+                player.velocityY = player.gravityDirection * -10;
+                spawnParticles(player.x, player.y + player.size / 2, "#ffff00", 8);
+            } else if (currentMode === "jetpack") {
+                // Double jump enabled for jetpack: can jump if grounded OR if jump count is under maxJumps (air jump)
+                if (player.grounded || player.jumpCount < player.maxJumps) {
+                    player.velocityY = -11; // upward thrust
+                    player.grounded = false;
+                    player.jumpCount++;
+                    spawnParticles(player.x, player.y + player.size, player.jumpCount === 2 ? "#ff00ff" : "#00ffcc", 8);
+                }
+            }
+        }
+
+        function resetGame() {
+            score = 0;
+            gameSpeed = 7;
+            obstacles = [];
+            player.y = 300;
+            player.velocityY = 0;
+            player.grounded = true;
+            player.jumpCount = 0;
+            player.rotation = 0;
+            player.gravityDirection = 1;
+            player.trail = [];
+            isGameOver = false;
+            spawnTimer = 0;
+            currentModeIndex = 0;
+            currentMode = modes[currentModeIndex];
+            modeTimer = 0;
+            transitionCoin = null;
+            waveModeActive = false;
+            waveDelayTimer = 0;
+            jetpackModeActive = false;
+            platforms = [];
+            jetpackSpawnTimer = 0;
+            particles = [];
+        }
+
+        function spawnParticles(x, y, color, count) {
+            for (let i = 0; i < count; i++) {
+                particles.push({
+                    x: x,
+                    y: y,
+                    vx: (Math.random() - 0.5) * 8,
+                    vy: (Math.random() - 0.5) * 8,
+                    color: color,
+                    life: 18
+                });
+            }
+        }
+
+        function spawnJetpackPlatform() {
+            let lastX = platforms.length > 0 ? platforms[platforms.length - 1].x + platforms[platforms.length - 1].width : canvas.width;
+            let gap = Math.random() * 50 + 40; // Short gaps between platforms
+            let width = Math.random() * 120 + 220; // Long platforms (220px to 340px)
+            let height = 20;
+            let y = Math.random() * 90 + 210; // Floating platforms at varying heights
+
+            platforms.push({
+                x: lastX + gap,
+                y: y,
+                width: width,
+                height: height
+            });
+        }
+
+        function spawnObstacle() {
+            if (waveModeActive || jetpackModeActive) return;
+
+            const types = ["spacedStairs", "spike", "saw", "platformBlock", "floatingLaser"];
+            const type = types[Math.floor(Math.random() * types.length)];
+
+            if (type === "spacedStairs") {
+                let stepHeight = 35;
+                for (let i = 0; i < 3; i++) {
+                    obstacles.push({
+                        type: "block",
+                        x: canvas.width + (i * 70),
+                        y: 330 - (i * stepHeight) - 10,
+                        width: 40,
+                        height: stepHeight + (i * stepHeight) + 10
+                    });
+                }
+            } else if (type === "spike") {
+                obstacles.push({ type: "spike", x: canvas.width, y: 330, width: 30, height: 30 });
+            } else if (type === "saw") {
+                obstacles.push({ 
+                    type: "saw", 
+                    x: canvas.width, 
+                    y: Math.random() * 200 + 80, 
+                    radius: 18, 
+                    angle: 0 
+                });
+            } else if (type === "platformBlock") {
+                obstacles.push({
+                    type: "block",
+                    x: canvas.width,
+                    y: 230,
+                    width: 90,
+                    height: 130
+                });
+            } else if (type === "floatingLaser") {
+                obstacles.push({
+                    type: "laser",
+                    x: canvas.width,
+                    y: Math.random() * 220 + 60,
+                    width: 70,
+                    height: 10
+                });
+            }
+        }
+
+        function update() {
+            if (!isGameOver) {
+                gameSpeed += 0.002;
+                score++;
+                modeTimer++;
+                backgroundHue = (backgroundHue + 0.5) % 360;
+
+                // When modeTimer hits 500, spawn an unmissable giant gate wall
+                if (modeTimer >= 500 && !transitionCoin) {
+                    obstacles = [];
+                    transitionCoin = {
+                        x: canvas.width,
+                        width: 45,
+                        height: 360,
+                        collected: false
+                    };
+                }
+
+                // Move and check collision for the giant gate coin
+                if (transitionCoin) {
+                    transitionCoin.x -= gameSpeed;
+                    
+                    if (
+                        player.x < transitionCoin.x + transitionCoin.width &&
+                        player.x + player.size > transitionCoin.x
+                    ) {
+                        transitionCoin.collected = true;
+                        score += 150; 
+                        spawnParticles(transitionCoin.x + transitionCoin.width/2, 180, "#ffd700", 35);
+
+                        let oldMode = currentMode;
+                        currentModeIndex = (currentModeIndex + 1) % modes.length;
+                        currentMode = modes[currentModeIndex];
+                        modeTimer = 0; 
+                        player.gravityDirection = 1;
+
+                        if (oldMode === "wave" && waveModeActive) {
+                            waveModeActive = false;
+                        }
+                        if (oldMode === "jetpack" && jetpackModeActive) {
+                            jetpackModeActive = false;
+                            platforms = [];
+                        }
+
+                        if (currentMode === "wave") {
+                            obstacles = [];
+                            waveModeActive = true;
+                            waveDelayTimer = 300; 
+                        } else if (currentMode === "jetpack") {
+                            obstacles = [];
+                            jetpackModeActive = true;
+                            platforms = [];
+                            // Spawn initial long platforms immediately right away over the void
+                            platforms.push({ x: 0, y: 330, width: 350, height: 20 });
+                            platforms.push({ x: 420, y: 280, width: 300, height: 20 });
+                            platforms.push({ x: 780, y: 240, width: 320, height: 20 });
+                            jetpackSpawnTimer = 0;
+                        }
+
+                        spawnParticles(canvas.width / 2, canvas.height / 2, "#ff00ff", 30);
+                        transitionCoin = null;
+                    }
+                }
+
+                if (waveModeActive && waveDelayTimer > 0) {
+                    waveDelayTimer--;
+                }
+
+                const groundLevel = 330;
+
+                if (currentMode === "cube") {
+                    player.velocityY += player.gravity;
+                    player.y += player.velocityY;
+
+                    if (player.y >= groundLevel) {
+                        player.y = groundLevel;
+                        player.velocityY = 0;
+                        player.grounded = true;
+                        player.jumpCount = 0;
+                        player.rotation = Math.round(player.rotation / (Math.PI / 2)) * (Math.PI / 2);
+                    } else {
+                        player.rotation += 0.15;
+                    }
+                } else if (currentMode === "ball") {
+                    player.velocityY += player.gravity * player.gravityDirection * 1.2;
+                    player.y += player.velocityY;
+
+                    if (player.y < 0) { player.y = 0; player.velocityY = 0; }
+
+                    if (player.y >= groundLevel) {
+                        player.y = groundLevel;
+                        player.velocityY = 0;
+                        player.grounded = true;
+                    }
+                    player.rotation += player.gravityDirection * 0.2;
+                } else if (currentMode === "ship") {
+                    player.grounded = false;
+                    player.jumpCount = 0;
+                    if (isHoldingJump) {
+                        player.velocityY -= 0.75;
+                        spawnParticles(player.x, player.y + player.size / 2, "#00ffff", 1);
+                    } else {
+                        player.velocityY += 0.65;
+                    }
+                    if (player.velocityY > 8) player.velocityY = 8;
+                    if (player.velocityY < -8) player.velocityY = -8;
+                    
+                    player.y += player.velocityY;
+                    player.rotation = player.velocityY * 0.08;
+
+                    if (player.y < 0) { player.y = 0; player.velocityY = 0; }
+                    if (player.y > groundLevel) { player.y = groundLevel; player.velocityY = 0; }
+                } else if (currentMode === "wave") {
+                    player.grounded = false;
+                    player.jumpCount = 0;
+                    if (isHoldingJump) {
+                        player.y -= 7.5;
+                        player.rotation = -0.6;
+                    } else {
+                        player.y += 7.5;
+                        player.rotation = 0.6;
+                    }
+                    
+                    if (player.y < 0) player.y = 0;
+                    if (player.y > groundLevel) player.y = groundLevel;
+                } else if (currentMode === "jetpack") {
+                    // Void physics active immediately with double jump support
+                    player.velocityY += 0.8; 
+                    if (player.velocityY > 10) player.velocityY = 10;
+                    player.y += player.velocityY;
+                    player.rotation = player.velocityY * 0.04;
+
+                    if (player.y < 20) { player.y = 20; player.velocityY = 0; }
+
+                    if (player.y > canvas.height + 50) {
+                        triggerGameOver();
+                    }
+                }
+
+                player.trail.push({ x: player.x, y: player.y });
+                if (player.trail.length > 10) player.trail.shift();
+
+                if (!waveModeActive && !jetpackModeActive && !transitionCoin) {
+                    spawnTimer++;
+                    if (spawnTimer >= nextSpawnTime) {
+                        spawnObstacle();
+                        spawnTimer = 0;
+                        nextSpawnTime = Math.max(35, Math.floor(85 - gameSpeed * 3));
+                    }
+                }
+
+                // Check Continuous Wave Collision
+                if (waveModeActive && waveDelayTimer === 0) {
+                    if (player.y < 30 || player.y + player.size > 330) {
+                        triggerGameOver();
+                    }
+                }
+
+                // Update Jetpack Platforms & Collisions
+                if (jetpackModeActive) {
+                    jetpackSpawnTimer++;
+                    if (jetpackSpawnTimer >= 55) {
+                        spawnJetpackPlatform();
+                        jetpackSpawnTimer = 0;
+                    }
+
+                    player.grounded = false;
+
+                    for (let i = platforms.length - 1; i >= 0; i--) {
+                        let p = platforms[i];
+                        p.x -= gameSpeed;
+
+                        if (
+                            player.x + player.size > p.x &&
+                            player.x < p.x + p.width &&
+                            player.y + player.size >= p.y &&
+                            player.y + player.size - player.velocityY <= p.y + 12 &&
+                            player.velocityY >= 0
+                        ) {
+                            player.y = p.y - player.size;
+                            player.velocityY = 0;
+                            player.grounded = true;
+                            player.jumpCount = 0; // Reset jumps upon landing on a platform
+                        }
+
+                        if (p.x + p.width < 0) {
+                            platforms.splice(i, 1);
+                        }
+                    }
+                }
+
+                for (let i = obstacles.length - 1; i >= 0; i--) {
+                    let obs = obstacles[i];
+                    obs.x -= gameSpeed;
+
+                    if (obs.type === "spike") {
+                        if (
+                            player.x < obs.x + obs.width - 6 &&
+                            player.x + player.size > obs.x + 6 &&
+                            player.y < obs.y + obs.height &&
+                            player.y + player.size > obs.y
+                        ) {
+                            triggerGameOver();
+                        }
+                    } else if (obs.type === "block") {
+                        if (
+                            player.x + player.size > obs.x + 4 &&
+                            player.x < obs.x + obs.width - 4 &&
+                            player.y + player.size > obs.y &&
+                            player.y < obs.y + obs.height
+                        ) {
+                            if (player.velocityY > 0 && player.y + player.size - player.velocityY <= obs.y + 12 && currentMode === "cube") {
+                                player.y = obs.y - player.size;
+                                player.velocityY = 0;
+                                player.grounded = true;
+                                player.jumpCount = 0;
+                                player.rotation = Math.round(player.rotation / (Math.PI / 2)) * (Math.PI / 2);
+                            } else {
+                                triggerGameOver();
+                            }
+                        }
+                    } else if (obs.type === "saw") {
+                        obs.angle += 0.2;
+                        let dx = (player.x + player.size/2) - (obs.x + obs.radius);
+                        let dy = (player.y + player.size/2) - obs.y;
+                        let dist = Math.sqrt(dx * dx + dy * dy);
+                        if (dist < player.size / 2 + obs.radius - 5) {
+                            triggerGameOver();
+                        }
+                    } else if (obs.type === "laser") {
+                        if (
+                            player.x < obs.x + obs.width &&
+                            player.x + player.size > obs.x &&
+                            player.y < obs.y + obs.height &&
+                            player.y + player.size > obs.y
+                        ) {
+                            triggerGameOver();
+                        }
+                    }
+
+                    if (obs.x + (obs.width || obs.radius * 2 || 50) < 0) {
+                        obstacles.splice(i, 1);
+                    }
+                }
+
+                for (let i = particles.length - 1; i >= 0; i--) {
+                    let p = particles[i];
+                    p.x += p.vx;
+                    p.y += p.vy;
+                    p.life--;
+                    if (p.life <= 0) particles.splice(i, 1);
+                }
+            }
+        }
+
+        function triggerGameOver() {
+            isGameOver = true;
+            if (score > highScore) highScore = score;
+            spawnParticles(player.x + player.size/2, player.y + player.size/2, "#ff0055", 35);
+        }
+
+        function draw() {
+            ctx.fillStyle = "#030308";
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            ctx.strokeStyle = `hsla(${backgroundHue}, 100%, 50%, 0.12)`;
+            ctx.lineWidth = 1;
+            let gridOffset = (score * gameSpeed * 0.4) % 40;
+            for (let x = -gridOffset; x < canvas.width; x += 40) {
+                ctx.beginPath();
+                ctx.moveTo(x, 0);
+                ctx.lineTo(x, canvas.height);
+                ctx.stroke();
+            }
+
+            // Draw Ground Line (shown during normal play, hidden entirely during jetpack mode for the void)
+            if (!jetpackModeActive) {
+                ctx.strokeStyle = "#00ffff";
+                ctx.lineWidth = 4;
+                ctx.shadowBlur = 15;
+                ctx.shadowColor = "#00ffff";
+                ctx.beginPath();
+                ctx.moveTo(0, 360);
+                ctx.lineTo(canvas.width, 360);
+                ctx.stroke();
+            } else {
+                // Render Void abyss warning label at bottom during jetpack mode
+                ctx.fillStyle = "rgba(255, 0, 85, 0.25)";
+                ctx.fillRect(0, 370, canvas.width, 30);
+                ctx.fillStyle = "#ff0055";
+                ctx.shadowColor = "#ff0055";
+                ctx.shadowBlur = 10;
+                ctx.font = "bold 12px monospace";
+                ctx.fillText("=== THE VOID (DO NOT FALL) ===", canvas.width / 2 - 110, 390);
+            }
+
+            // Render Unmissable Full-Screen Gate Coin Wall
+            if (transitionCoin && !transitionCoin.collected) {
+                ctx.save();
+                ctx.shadowBlur = 30;
+                ctx.shadowColor = "#ffd700";
+                
+                ctx.fillStyle = "rgba(255, 215, 0, 0.25)";
+                ctx.fillRect(transitionCoin.x - 10, 0, transitionCoin.width + 20, 360);
+
+                ctx.fillStyle = "#ffd700";
+                ctx.fillRect(transitionCoin.x, 0, transitionCoin.width, 360);
+
+                ctx.fillStyle = "#030308";
+                ctx.fillRect(transitionCoin.x + 8, 60, transitionCoin.width - 16, 80);
+                ctx.fillRect(transitionCoin.x + 8, 220, transitionCoin.width - 16, 80);
+
+                ctx.restore();
+            }
+
+            // Render Jetpack Platforms over the void
+            if (jetpackModeActive) {
+                ctx.strokeStyle = "#00ffcc";
+                ctx.fillStyle = "#051a1a";
+                ctx.shadowColor = "#00ffcc";
+                ctx.shadowBlur = 12;
+
+                platforms.forEach(p => {
+                    ctx.fillRect(p.x, p.y, p.width, p.height);
+                    ctx.strokeRect(p.x, p.y, p.width, p.height);
+                });
+            }
+
+            // Render Continuous Wave Spikes (Top and Bottom Rows)
+            if (waveModeActive && waveDelayTimer === 0) {
+                ctx.strokeStyle = "#ff00ff";
+                ctx.fillStyle = "#ff00ff";
+                ctx.shadowColor = "#ff00ff";
+                ctx.shadowBlur = 12;
+
+                let spikeWidth = 30;
+                let waveScrollOffset = (score * gameSpeed) % spikeWidth;
+
+                for (let x = -waveScrollOffset; x < canvas.width; x += spikeWidth) {
+                    ctx.beginPath();
+                    ctx.moveTo(x, 0);
+                    ctx.lineTo(x + spikeWidth / 2, 30);
+                    ctx.lineTo(x + spikeWidth, 0);
+                    ctx.closePath();
+                    ctx.fill();
+                    ctx.stroke();
+                }
+
+                for (let x = -waveScrollOffset; x < canvas.width; x += spikeWidth) {
+                    ctx.beginPath();
+                    ctx.moveTo(x, 360);
+                    ctx.lineTo(x + spikeWidth / 2, 330);
+                    ctx.lineTo(x + spikeWidth, 360);
+                    ctx.closePath();
+                    ctx.fill();
+                    ctx.stroke();
+                }
+            }
+
+            // Render Standard Obstacles
+            obstacles.forEach(obs => {
+                if (obs.type === "spike") {
+                    ctx.strokeStyle = "#ff00ff";
+                    ctx.fillStyle = "#ff00ff";
+                    ctx.shadowColor = "#ff00ff";
+                    ctx.shadowBlur = 12;
+                    ctx.beginPath();
+                    ctx.moveTo(obs.x, obs.y + obs.height);
+                    ctx.lineTo(obs.x + obs.width / 2, obs.y);
+                    ctx.lineTo(obs.x + obs.width, obs.y + obs.height);
+                    ctx.closePath();
+                    ctx.fill();
+                    ctx.stroke();
+                } else if (obs.type === "block") {
+                    ctx.strokeStyle = "#00ffff";
+                    ctx.fillStyle = "#05051a";
+                    ctx.shadowColor = "#00ffff";
+                    ctx.shadowBlur = 10;
+                    ctx.fillRect(obs.x, obs.y, obs.width, obs.height);
+                    ctx.strokeRect(obs.x, obs.y, obs.width, obs.height);
+                } else if (obs.type === "saw") {
+                    ctx.save();
+                    ctx.translate(obs.x + obs.radius, obs.y);
+                    ctx.rotate(obs.angle);
+                    ctx.strokeStyle = "#ff5500";
+                    ctx.fillStyle = "#ff0055";
+                    ctx.shadowColor = "#ff0055";
+                    ctx.shadowBlur = 15;
+                    ctx.beginPath();
+                    ctx.arc(0, 0, obs.radius, 0, Math.PI * 2);
+                    ctx.fill();
+                    ctx.stroke();
+                    ctx.restore();
+                } else if (obs.type === "laser") {
+                    ctx.shadowColor = "#00ffff";
+                    ctx.shadowBlur = 18;
+                    ctx.fillStyle = "#ffffff";
+                    ctx.fillRect(obs.x, obs.y, obs.width, obs.height);
+                }
+            });
+
+            // Particles
+            particles.forEach(p => {
+                ctx.shadowBlur = 5;
+                ctx.shadowColor = p.color;
+                ctx.fillStyle = p.color;
+                ctx.fillRect(p.x, p.y, 4, 4);
+            });
+
+            for (let i = 0; i < player.trail.length; i++) {
+                let t = player.trail[i];
+                let alpha = i / player.trail.length;
+                ctx.fillStyle = `rgba(0, 255, 255, ${alpha * 0.35})`;
+                ctx.fillRect(t.x, t.y, player.size, player.size);
+            }
+
+            ctx.save();
+            ctx.translate(player.x + player.size / 2, player.y + player.size / 2);
+            ctx.rotate(player.rotation);
+
+            ctx.shadowBlur = 20;
+            ctx.shadowColor = currentMode === "cube" ? "#00ffff" : currentMode === "ball" ? "#ffff00" : currentMode === "ship" ? "#ff00ff" : currentMode === "wave" ? "#00ff88" : "#00ffcc";
+
+            if (currentMode === "cube") {
+                ctx.fillStyle = "#00ffff";
+                ctx.fillRect(-player.size / 2, -player.size / 2, player.size, player.size);
+                ctx.fillStyle = "#0b0b1a";
+                ctx.fillRect(-player.size / 2 + 5, -player.size / 2 + 5, player.size - 10, player.size - 10);
+            } else if (currentMode === "ball") {
+                ctx.fillStyle = "#ffff00";
+                ctx.beginPath();
+                ctx.arc(0, 0, player.size / 2, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.fillStyle = "#111122";
+                ctx.fillRect(-4, -4, 8, 8);
+            } else if (currentMode === "ship") {
+                ctx.fillStyle = "#ff00ff";
+                ctx.beginPath();
+                ctx.moveTo(player.size / 2, 0);
+                ctx.lineTo(-player.size / 2, -player.size / 2);
+                ctx.lineTo(-player.size / 4, 0);
+                ctx.lineTo(-player.size / 2, player.size / 2);
+                ctx.closePath();
+                ctx.fill();
+            } else if (currentMode === "wave") {
+                ctx.fillStyle = "#00ff88";
+                ctx.beginPath();
+                ctx.moveTo(player.size / 2, 0);
+                ctx.lineTo(-player.size / 2, -player.size / 3);
+                ctx.lineTo(-player.size / 2, player.size / 3);
+                ctx.closePath();
+                ctx.fill();
+            } else if (currentMode === "jetpack") {
+                // Little Robot with booster shoes
+                ctx.fillStyle = "#00ffcc";
+                ctx.fillRect(-player.size / 2, -player.size / 2, player.size, player.size);
+                // Robot visor eyes
+                ctx.fillStyle = "#030308";
+                ctx.fillRect(-6, -6, 12, 6);
+                // Booster shoes attached at the bottom
+                ctx.fillStyle = "#ff5500";
+                ctx.fillRect(-10, player.size / 2, 6, 6);
+                ctx.fillRect(4, player.size / 2, 6, 6);
+            }
+            ctx.restore();
+
+            ctx.shadowBlur = 5;
+            ctx.shadowColor = "#ffffff";
+            ctx.fillStyle = "#ffffff";
+            ctx.font = "bold 15px monospace";
+            ctx.fillText(`SCORE: ${Math.floor(score / 10)}`, 20, 35);
+            ctx.fillText(`HI: ${Math.floor(highScore / 10)}`, 20, 60);
+            
+            if (waveModeActive && waveDelayTimer > 0) {
+                let secondsLeft = (waveDelayTimer / 60).toFixed(1);
+                ctx.fillStyle = "#00ff88";
+                ctx.shadowColor = "#00ff88";
+                ctx.fillText(`SPIKES IN: ${secondsLeft}s`, canvas.width / 2 - 60, 35);
+            }
+
+            ctx.fillStyle = "#ff00ff";
+            ctx.shadowColor = "#ff00ff";
+            ctx.fillText(`MODE: ${currentMode.toUpperCase()}`, canvas.width - 170, 35);
+
+            if (isGameOver) {
+                ctx.fillStyle = "rgba(0, 0, 0, 0.8)";
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+                ctx.shadowBlur = 25;
+                ctx.shadowColor = "#ff0055";
+                ctx.fillStyle = "#ff0055";
+                ctx.font = "bold 40px monospace";
+                ctx.textAlign = "center";
+                ctx.fillText("CRASHED!", canvas.width / 2, canvas.height / 2 - 20);
+
+                ctx.shadowColor = "#00ffff";
+                ctx.fillStyle = "#00ffff";
+                ctx.font = "18px monospace";
+                ctx.fillText("Click or Press Space to Play Again", canvas.width / 2, canvas.height / 2 + 25);
+                ctx.textAlign = "left";
+            }
+        }
+
+        function loop() {
+            update();
+            draw();
+            requestAnimationFrame(loop);
+        }
+
+        loop();
+    </script>
+</body>
+</html>
